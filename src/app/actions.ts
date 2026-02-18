@@ -769,7 +769,8 @@ export async function updateOrganisation(
     const orgRef = doc(db, "organisations", orgId);
 
     // Strip sensitive fields that only owner/admin can change
-    const { status, visibility, eventsEnabled, ...safeValues } = values as Record<string, unknown> & {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { status: _status, visibility: _visibility, eventsEnabled: _eventsEnabled, ...safeValues } = values as Record<string, unknown> & {
       status?: string;
       visibility?: string;
       eventsEnabled?: boolean;
@@ -1270,7 +1271,8 @@ export async function updateMyProfile(
     const userRef = doc(db, "users", userId);
 
     // Prevent users from changing their own role
-    const { role, ...safeValues } = values;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { role: _role, ...safeValues } = values;
 
     await updateDoc(userRef, {
       ...safeValues,
@@ -2021,7 +2023,7 @@ export async function getAuditLogs(
     }
 
     const db = getDb();
-    let q = collection(db, "audit_logs");
+    const q = collection(db, "audit_logs");
     const constraints: ReturnType<typeof where>[] = [];
 
     if (filters?.targetEntityId) {
