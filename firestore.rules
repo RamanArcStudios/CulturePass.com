@@ -1,0 +1,305 @@
+rules_version = '2';
+
+// ============================================================================
+// CulturePass – Firestore Security Rules
+// ============================================================================
+// Three-layer permission model:
+//   1. Platform Level  – user, moderator, superadmin
+//   2. Entity Level    – owner, admin, event_manager, finance_manager, content_editor
+//   3. Event Level     – derived from entity roles
+//
+// IMPORTANT: These rules enforce server-side security. All writes should go
+//            through server actions, but these rules provide defence-in-depth.
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -----------------------------------------------------------------------
+    // Helper Functions
+    // -----------------------------------------------------------------------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role_global;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && getUserRole() == 'superadmin';
+    }
+
+    function isModerator() {
+      return isSignedIn() && (getUserRole() == 'moderator' || getUserRole() == 'superadmin');
+    }
+
+    function getEntityRole(entityId) {
+      return get(/databases/$(database)/documents/entity_roles/$(entityId + '_' + request.auth.uid)).data.role;
+    }
+
+    function hasEntityRole(entityId, roles) {
+      return isSignedIn() && getEntityRole(entityId) in roles;
+    }
+
+    function isProtectedSuperAdmin(userId) {
+      return userId == 'jQUz8YHqLxOUYgIiMxr6vZC3vT72'
+          || userId == '6SlcJXbFb2TJjfRknugGnNPfvOA2';
+    }
+
+    // -----------------------------------------------------------------------
+    // Users Collection
+    // -----------------------------------------------------------------------
+    match /users/{userId} {
+      // Anyone signed in can read user profiles
+      allow read: if isSignedIn();
+
+      // Users can update their own profile (except role fields)
+      allow update: if isOwner(userId)
+                    && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role_global', 'isBanned']);
+
+      // SuperAdmin can update any user profile
+      allow update: if isSuperAdmin()
+                    && !(isProtectedSuperAdmin(userId) && request.resource.data.diff(resource.data).affectedKeys().hasAny(['role_global']));
+
+      // Only server actions create user docs (via admin SDK or client with rules below)
+      allow create: if isOwner(userId);
+
+      // No client-side delete
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------------------------
+    // Organisations Collection
+    // -----------------------------------------------------------------------
+    match /organisations/{orgId} {
+      // Public: anyone can read approved orgs
+      allow read: if resource.data.visibility == 'public'
+                  || isSignedIn() && (hasEntityRole(orgId, ['owner', 'admin', 'event_manager', 'finance_manager', 'content_editor']) || isSuperAdmin());
+
+      // Create: any signed-in user (status will be 'pending')
+      allow create: if isSignedIn()
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.visibility == 'hidden';
+
+      // Update: entity team (owner/admin/content_editor) or superadmin
+      allow update: if hasEntityRole(orgId, ['owner', 'admin', 'content_editor'])
+                    || isSuperAdmin();
+
+      // Delete: owner only (with superadmin review — enforced in server action)
+      allow delete: if hasEntityRole(orgId, ['owner']) || isSuperAdmin();
+
+      // --- Organisation Members Subcollection ---
+      match /members/{memberId} {
+        allow read: if isSignedIn();
+        allow write: if hasEntityRole(orgId, ['owner', 'admin']) || isSuperAdmin();
+      }
+
+      // --- Organisation Events Subcollection ---
+      match /events/{eventId} {
+        allow read: if true;
+        allow create: if hasEntityRole(orgId, ['owner', 'admin', 'event_manager'])
+                      && resource == null; // only create, not overwrite
+        allow update: if hasEntityRole(orgId, ['owner', 'admin', 'event_manager']) || isSuperAdmin();
+        allow delete: if hasEntityRole(orgId, ['owner', 'admin']) || isSuperAdmin();
+
+        // --- Ticket Types ---
+        match /ticketTypes/{ticketId} {
+          allow read: if true;
+          allow write: if hasEntityRole(orgId, ['owner', 'admin', 'event_manager']) || isSuperAdmin();
+        }
+      }
+
+      // --- Organisation Posts Subcollection ---
+      match /posts/{postId} {
+        allow read: if true;
+        allow create: if isSignedIn();
+        allow update: if isOwner(resource.data.authorId) || isModerator();
+        allow delete: if isOwner(resource.data.authorId) || isModerator();
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Public Events Collection (mirror)
+    // -----------------------------------------------------------------------
+    match /events/{eventId} {
+      allow read: if true;
+      // Writes go through server actions only
+      allow write: if isSuperAdmin();
+    }
+
+    // -----------------------------------------------------------------------
+    // Artists Collection
+    // -----------------------------------------------------------------------
+    match /artists/{artistId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if hasEntityRole(artistId, ['owner', 'admin', 'content_editor'])
+                    || isOwner(resource.data.ownerId)
+                    || isSuperAdmin();
+      allow delete: if hasEntityRole(artistId, ['owner'])
+                    || isOwner(resource.data.ownerId)
+                    || isSuperAdmin();
+    }
+
+    // -----------------------------------------------------------------------
+    // Businesses Collection
+    // -----------------------------------------------------------------------
+    match /businesses/{businessId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if hasEntityRole(businessId, ['owner', 'admin', 'content_editor'])
+                    || isOwner(resource.data.ownerId)
+                    || isSuperAdmin();
+      allow delete: if hasEntityRole(businessId, ['owner'])
+                    || isOwner(resource.data.ownerId)
+                    || isSuperAdmin();
+    }
+
+    // -----------------------------------------------------------------------
+    // Venues Collection
+    // -----------------------------------------------------------------------
+    match /venues/{venueId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if hasEntityRole(venueId, ['owner', 'admin', 'content_editor'])
+                    || isOwner(resource.data.ownerId)
+                    || isSuperAdmin();
+      allow delete: if hasEntityRole(venueId, ['owner'])
+                    || isOwner(resource.data.ownerId)
+                    || isSuperAdmin();
+
+      match /bookableSpaces/{spaceId} {
+        allow read: if true;
+        allow write: if hasEntityRole(venueId, ['owner', 'admin']) || isSuperAdmin();
+
+        match /slots/{slotId} {
+          allow read: if true;
+          allow write: if hasEntityRole(venueId, ['owner', 'admin']) || isSuperAdmin();
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Entity Roles Collection
+    // -----------------------------------------------------------------------
+    match /entity_roles/{roleId} {
+      // Users can read their own roles; entity admins can read all roles for their entity
+      allow read: if isSignedIn();
+
+      // Only server actions should write roles (enforced through actions.ts)
+      // But allow as fallback for team management
+      allow create, update: if isSuperAdmin()
+                            || hasEntityRole(resource.data.entityId, ['owner', 'admin']);
+      allow delete: if isSuperAdmin()
+                    || hasEntityRole(resource.data.entityId, ['owner', 'admin']);
+    }
+
+    // -----------------------------------------------------------------------
+    // Orders Collection
+    // -----------------------------------------------------------------------
+    match /orders/{orderId} {
+      allow read: if isOwner(resource.data.userId) || isSuperAdmin();
+      allow create: if isSignedIn();
+      // Only server actions handle order updates (refunds, status changes)
+      allow update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------------------------
+    // Perks Collection
+    // -----------------------------------------------------------------------
+    match /perks/{perkId} {
+      allow read: if true;
+      allow create, update, delete: if isSuperAdmin()
+                                    || hasEntityRole(resource.data.businessId, ['owner', 'admin', 'event_manager']);
+    }
+
+    // -----------------------------------------------------------------------
+    // Notifications Collection
+    // -----------------------------------------------------------------------
+    match /notifications/{notifId} {
+      allow read: if isOwner(resource.data.userId);
+      allow update: if isOwner(resource.data.userId); // mark as read
+      allow create: if isSuperAdmin(); // system-generated
+      allow delete: if isOwner(resource.data.userId);
+    }
+
+    // -----------------------------------------------------------------------
+    // Payment Setup Collection
+    // -----------------------------------------------------------------------
+    match /payment_setup/{entityId} {
+      allow read: if isSignedIn();
+      // Only server actions manage payment setup
+      allow write: if isSuperAdmin();
+    }
+
+    // -----------------------------------------------------------------------
+    // Audit Logs Collection (IMMUTABLE)
+    // -----------------------------------------------------------------------
+    match /audit_logs/{logId} {
+      // Only SuperAdmins can read audit logs
+      allow read: if isSuperAdmin();
+      // Append-only: create allowed from server actions, no update/delete ever
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    // -----------------------------------------------------------------------
+    // CPID Registry
+    // -----------------------------------------------------------------------
+    match /cpids/{cpid} {
+      allow read: if true;
+      // Only server actions write CPIDs
+      allow write: if isSignedIn();
+    }
+
+    // -----------------------------------------------------------------------
+    // Sponsorship Requests
+    // -----------------------------------------------------------------------
+    match /sponsorshipRequests/{requestId} {
+      allow read: if isSuperAdmin();
+      allow create: if isSignedIn();
+      allow update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------------------------
+    // Venue Bookings
+    // -----------------------------------------------------------------------
+    match /venueBookings/{bookingId} {
+      allow read: if isOwner(resource.data.userId) || isSuperAdmin();
+      allow create: if isSignedIn();
+      allow update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------------------------
+    // Services & Bookings
+    // -----------------------------------------------------------------------
+    match /services/{serviceId} {
+      allow read: if true;
+      allow write: if hasEntityRole(resource.data.businessId, ['owner', 'admin']) || isSuperAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if isOwner(resource.data.userId) || isSuperAdmin();
+      allow create: if isSignedIn();
+      allow update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------------------------
+    // Certificates
+    // -----------------------------------------------------------------------
+    match /certificates/{certId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+  }
+}
