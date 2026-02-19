@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "CulturePass",
+    "slug": "culturepass",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "culturepass",
+    "splash": {
+      "backgroundColor": "#6C63FF"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.culturepass.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#6C63FF"
+      },
+      "package": "com.culturepass.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": ["expo-router", "expo-font"]
+  }
+}

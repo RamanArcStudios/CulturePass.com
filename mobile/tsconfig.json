@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@components/*": ["./src/components/*"],
+      "@screens/*": ["./src/screens/*"],
+      "@hooks/*": ["./src/hooks/*"],
+      "@lib/*": ["./src/lib/*"],
+      "@theme/*": ["./src/theme/*"],
+      "@context/*": ["./src/context/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", "src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules"]
+}
